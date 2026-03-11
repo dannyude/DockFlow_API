@@ -1,0 +1,229 @@
+DocFlow API - Reliability Implementation Changes
+Date: 2026-03-03
+
+============================================================
+1) SUMMARY OF WHAT WAS IMPLEMENTED
+============================================================
+This update implemented four reliability pillars across the API + Celery workflow:
+
+1. Dual-Write Recovery (Outbox/Sweeper pattern)
+2. Idempotent Worker Processing
+3. AI Circuit Breaker for graceful degradation
+4. Distributed Tracing via Correlation IDs
+
+It also added targeted reliability tests and database migration support.
+
+
+============================================================
+2) DETAILED CHANGES BY REQUIREMENT
+============================================================
+
+A) Dual-Write Problem (Partial Failures)
+----------------------------------------
+Problem addressed:
+- API submits a job and writes to multiple systems (S3/MinIO, PostgreSQL, Redis/Celery).
+- If DB write succeeds but Celery dispatch fails, jobs can remain stuck forever.
+
+What was implemented:
+1. Added periodic sweeper task:
+   - File: api/src/tasks/sweep_pending_jobs.py
+   - Task: sweep_stuck_jobs_task
+   - Behavior:
+     - Runs every 5 minutes.
+     - Queries jobs stuck in PENDING or QUEUED_AI_OUTAGE for >10 minutes.
+     - Re-dispatches jobs safely to Celery when circuit is closed.
+     - Increments enqueue_attempts and updates last_enqueued_at.
+
+2. Registered sweeper in Celery beat schedule:
+   - File: api/src/tasks/celery_app.py
+   - Added beat_schedule entry:
+     - sweep-stuck-pending-jobs
+     - cron: every 5 minutes
+
+3. Added tracking fields for observability:
+   - File: api/src/jobs/models.py
+   - New columns:
+     - enqueue_attempts (int)
+     - last_enqueued_at (datetime, nullable)
+
+
+B) Idempotency (Safe Retries)
+-----------------------------
+Problem addressed:
+- Celery retries can re-run the same job and waste cost or overwrite final state.
+
+What was implemented:
+1. Idempotency guard in worker:
+   - File: api/src/tasks/process_job.py
+   - Before expensive processing, worker checks:
+     - if job.status is COMPLETE/COMPLETED -> return immediately.
+
+2. Retry behavior keeps terminal consistency:
+   - FAILED during retries
+   - DEAD after max retries
+   - completed_at set for terminal dead path
+
+
+C) Circuit Breaker (Graceful Degradation)
+-----------------------------------------
+Problem addressed:
+- AI provider outage causes retry storms and infrastructure thrashing.
+
+What was implemented:
+1. Circuit breaker constants/helpers:
+   - File: api/src/jobs/reliability.py
+   - Keys/constants:
+     - AI_BREAKER_FAILURE_KEY
+     - AI_BREAKER_OPEN_UNTIL_KEY
+     - AI_BREAKER_FAILURE_THRESHOLD = 5
+     - AI_BREAKER_OPEN_SECONDS = 600
+   - Also includes sweep timing constants and UTC helper.
+
+2. Worker-side breaker logic:
+   - File: api/src/tasks/process_job.py
+   - Behavior:
+     - Detect AI/upstream failures.
+     - Count consecutive failures in Redis.
+     - Trip circuit after threshold and open for 10 minutes.
+     - Mark affected jobuccesss as QUEUED_AI_OUTAGE instead of retry storming.
+     - Reset failure counter after sful AI call.
+
+3. Submit-time breaker awareness:
+   - File: api/src/routers/jobs.py
+   - On incoming job:
+     - If circuit is open, save as QUEUED_AI_OUTAGE and do not dispatch task.
+     - If closed, normal PENDING + immediate dispatch.
+
+4. Added new status value:
+   - File: api/src/jobs/enums.py
+   - Added: QUEUED_AI_OUTAGE
+
+
+D) Distributed Tracing (Correlation IDs)
+----------------------------------------
+Problem addressed:
+- Hard to follow one request across API, storage, DB, and worker logs.
+
+What was implemented:
+1. Correlation ID generation at request entry:
+   - File: api/src/routers/jobs.py
+   - UUID created at start of submit_job.
+
+2. Correlation ID persisted in DB:
+   - File: api/src/jobs/models.py
+   - New column: correlation_id (indexed, non-null)
+
+3. Correlation ID propagated into storage:
+   - File: api/src/services/storage.py
+   - upload_to_s3 now accepts correlation_id
+   - S3 object key includes correlation segment
+   - Object metadata includes correlation_id
+
+4. Correlation ID propagated into task dispatch:
+   - File: api/src/routers/jobs.py
+   - Celery task called with args [job_id, correlation_id]
+
+5. Correlation ID exposed to clients:
+   - File: api/src/jobs/schemas.py
+   - Added correlation_id in JobResponse and JobStatusResponse
+
+
+============================================================
+3) FILES CREATED / UPDATED
+============================================================
+
+Created:
+- api/src/jobs/reliability.py
+- api/src/tasks/sweep_pending_jobs.py
+- api/src/tasks/__init__.py
+- alembic/versions/9b2f5d5d7a11_add_reliability_fields_and_queue_status.py
+- tests/test_reliability.py
+- Reliability_Implementation_Changes.doc (this file)
+
+Updated:
+- api/src/jobs/enums.py
+- api/src/jobs/models.py
+- api/src/jobs/crud.py
+- api/src/jobs/schemas.py
+- api/src/routers/jobs.py
+- api/src/services/storage.py
+- api/src/tasks/process_job.py
+- api/src/tasks/celery_app.py
+
+Deleted:
+- api/src/tenant/crud  (legacy script file without .py extension)
+
+
+============================================================
+4) DATABASE / MIGRATION DETAILS
+============================================================
+Migration file:
+- alembic/versions/9b2f5d5d7a11_add_reliability_fields_and_queue_status.py
+
+Upgrade actions:
+- Add enum value: QUEUED_AI_OUTAGE
+- Add columns to jobs:
+  - enqueue_attempts (default 0)
+  - correlation_id (nullable then backfilled from id::text, then set NOT NULL)
+  - last_enqueued_at (nullable)
+- Create index ix_jobs_correlation_id
+
+Downgrade actions:
+- Drop index and newly added columns
+(Note: enum value removal is intentionally not attempted in downgrade.)
+
+
+============================================================
+5) TESTING ADDED
+============================================================
+Added tests in:
+- tests/test_reliability.py
+
+Scenarios covered:
+1. process_job_task idempotent skip if already complete
+2. process_job_task marks queued during open circuit
+3. sweep_stuck_jobs_task requeues stale jobs and increments enqueue_attempts
+4. submit_job propagates correlation ID to storage + DB + Celery dispatch
+5. submit_job queues without dispatch when breaker is open
+
+
+============================================================
+6) OPERATIONAL DOs (IMPORTANT)
+============================================================
+1. Run migration before deploy:
+   alembic upgrade head
+
+2. Run both worker and beat:
+   - Celery worker handles processing
+   - Celery beat runs sweeper every 5 minutes
+
+3. Monitor these Redis keys:
+   - docflow:ai:breaker:consecutive_failures
+   - docflow:ai:breaker:open_until
+
+4. Track job statuses and alert if too many stale queued jobs:
+   - PENDING
+   - QUEUED_AI_OUTAGE
+
+5. Use correlation_id when searching logs and debugging incidents.
+
+
+============================================================
+7) CURRENT LIMITATION OBSERVED DURING LOCAL VALIDATION
+============================================================
+- Reliability tests were added and type diagnostics are clean.
+- Runtime test execution currently blocked in this environment because pytest is not installed in the project venv.
+
+To run tests after installing:
+- pip install pytest
+- python -m pytest tests/test_reliability.py -q
+
+
+============================================================
+8) HIGH-LEVEL IMPACT
+============================================================
+These changes significantly improve resilience in production conditions:
+- Recoverability from dispatch/network partial failures
+- Protection from duplicate work and excess AI costs
+- Controlled behavior during AI provider outages
+- Better debuggability across distributed components

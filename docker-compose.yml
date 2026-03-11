@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # 1. The PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: docflow_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: my_secret_password
+      POSTGRES_DB: docflow_db
+    ports:
+      - "5432:5432"
+    volumes:
+      # This ensures your database isn't wiped out if you restart your computer
+      - postgres_data:/var/lib/postgresql/data
+
+  # 2. The MinIO Storage (Your Private S3)
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
+    container_name: docflow_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: my_super_secret_password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  # 3. Redis (For Celery Task Queue & Bloom Filter)
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: docflow_redis
+    ports:
+      - "6379:6379"
+
+# Define the persistent storage volumes
+volumes:
+  postgres_data:
+  minio_data:

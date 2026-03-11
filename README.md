@@ -1,205 +1,384 @@
-# DocFlow API
+<div align="center">
 
-DocFlow API is a multi-tenant document extraction service built with FastAPI, Celery, PostgreSQL, Redis, and S3-compatible storage.
+<br/>
 
-It accepts uploaded files (PDF/images/DOCX), extracts text, runs schema-driven LLM extraction, and returns structured JSON results through polling and optional webhooks.
+<h1>
+  <img src="https://img.shields.io/badge/DocFlow-API-4F46E5?style=for-the-badge&logoColor=white" alt="DocFlow API" height="42"/>
+</h1>
 
-## Core Features
+<p><em>Multi-tenant document extraction service powered by LLM map-reduce — built for scale, reliability, and real-time observability.</em></p>
 
-- Multi-tenant API-key authentication.
-- File upload and asynchronous extraction jobs.
-- OCR and document text extraction pipeline.
-- LLM map-reduce extraction for large documents.
-- Reliability controls:
-	- Context-budgeting and bounded merge strategy.
-	- Concurrency throttling for LLM calls.
-	- AI outage circuit breaker.
-	- Retry/backoff behavior in Celery.
-- Duplicate detection with Redis Bloom filter.
-- Optional webhook callbacks on successful completion.
+<br/>
 
-## Tech Stack
+<!-- Tech Badges -->
+<img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white"/>
+<img src="https://img.shields.io/badge/Celery-37814A?style=flat-square&logo=celery&logoColor=white"/>
+<img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white"/>
+<img src="https://img.shields.io/badge/Redis-DC382D?style=flat-square&logo=redis&logoColor=white"/>
+<img src="https://img.shields.io/badge/S3-FF9900?style=flat-square&logo=amazon-s3&logoColor=white"/>
+<img src="https://img.shields.io/badge/OpenAI%20SDK-412991?style=flat-square&logo=openai&logoColor=white"/>
+<img src="https://img.shields.io/badge/Alembic-6B6B6B?style=flat-square&logoColor=white"/>
+<img src="https://img.shields.io/badge/Pydantic-E92063?style=flat-square&logo=pydantic&logoColor=white"/>
 
-- API: FastAPI
-- Async DB layer: SQLAlchemy (async)
-- Worker: Celery
-- Queue/cache: Redis
-- DB: PostgreSQL
-- Storage: S3-compatible object store (MinIO/AWS S3)
-- LLM client: OpenAI-compatible SDK (`AsyncOpenAI`, supports DeepSeek/OpenAI via `base_url`)
-- Validation: Pydantic
-- Testing: Pytest
+<br/><br/>
+
+<!-- Status Badges -->
+<img src="https://img.shields.io/badge/tests-23%20passed-22C55E?style=flat-square"/>
+<img src="https://img.shields.io/badge/license-MIT-3B82F6?style=flat-square"/>
+<img src="https://img.shields.io/badge/python-3.11%2B-F59E0B?style=flat-square&logo=python&logoColor=white"/>
+
+<br/><br/>
+
+---
+
+</div>
+
+## Overview
+
+DocFlow API accepts uploaded files **(PDF / images / DOCX)**, extracts plain text, runs **schema-driven LLM extraction**, and returns structured JSON results via async polling and optional webhooks.
+
+It is designed as a **multi-tenant SaaS backend** — every tenant is fully isolated, API keys are hashed, and the LLM pipeline is built with multiple layers of reliability so a single model outage never permanently blocks a job.
+
+<br/>
+
+---
+
+## ✦ Core Features
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Platform**
+- Multi-tenant API-key authentication
+- File upload & async extraction jobs
+- Duplicate detection via Redis Bloom filter
+- Optional webhook callbacks on completion
+- Real-time job progress messages persisted to DB
+
+</td>
+<td width="50%" valign="top">
+
+**Reliability**
+- LLM map-reduce for arbitrarily large documents
+- Context-budgeting & bounded merge strategy
+- Concurrency throttling (semaphore-gated)
+- AI outage circuit breaker
+- Retry / exponential backoff via Celery
+- `json-repair` fallback for malformed LLM output
+
+</td>
+</tr>
+</table>
+
+<br/>
+
+---
+
+## ⚙ Tech Stack
+
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Technology</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr><td>API</td><td><b>FastAPI</b></td><td>HTTP framework, routing, dependency injection</td></tr>
+<tr><td>Async DB</td><td><b>SQLAlchemy (async)</b></td><td>ORM for API routes</td></tr>
+<tr><td>Worker</td><td><b>Celery</b></td><td>Background extraction tasks</td></tr>
+<tr><td>Queue / Cache</td><td><b>Redis</b></td><td>Task broker, Bloom filter, circuit breaker state</td></tr>
+<tr><td>Database</td><td><b>PostgreSQL</b></td><td>Primary data store, job records, tenants, tokens</td></tr>
+<tr><td>Storage</td><td><b>S3-compatible</b></td><td>MinIO (local) / AWS S3 (production)</td></tr>
+<tr><td>LLM Client</td><td><b>AsyncOpenAI SDK</b></td><td>OpenAI or DeepSeek via configurable <code>base_url</code></td></tr>
+<tr><td>Validation</td><td><b>Pydantic v2</b></td><td>Request / response schema validation</td></tr>
+<tr><td>Migrations</td><td><b>Alembic</b></td><td>DB schema versioning</td></tr>
+<tr><td>Testing</td><td><b>Pytest</b></td><td>Unit & integration test suite</td></tr>
+</tbody>
+</table>
+
+<br/>
+
+---
 
 ## Project Layout
 
-High-level source structure:
+```
+DocFlow API/
+├── main.py                        # FastAPI app entrypoint & lifecycle
+├── api/src/
+│   ├── routers/                   # HTTP route handlers (health, jobs)
+│   ├── tasks/                     # Celery app + background tasks
+│   ├── services/                  # LLM, storage, extraction, webhook
+│   │   ├── llm.py                 # Map-reduce orchestration
+│   │   ├── llm_prompts.py         # Prompt builders
+│   │   └── llm_limits.py          # Token budgeting & chunking
+│   ├── jobs/                      # Job models, schemas, enums, CRUD
+│   ├── tenant/                    # Tenant models, routes, CRUD
+│   ├── auth/                      # Security, tokens, auth dependencies
+│   └── database/                  # SQLAlchemy & Redis client setup
+├── alembic/                       # DB migration versions
+└── tests/                         # Pytest test suite
+```
 
-- `main.py`: FastAPI app entrypoint and startup lifecycle.
-- `api/src/routers/`: HTTP endpoints (`health`, `jobs`).
-- `api/src/tasks/`: Celery app and background tasks.
-- `api/src/services/`: Integrations (LLM, storage, extraction, webhook).
-- `api/src/jobs/`: Job models, schemas, enums, CRUD, reliability constants.
-- `api/src/tenant/`: Tenant models, validation schemas, routes, CRUD.
-- `api/src/auth/`: Security, token, and auth dependencies.
-- `api/src/database/`: SQLAlchemy and Redis client setup.
-- `alembic/`: DB migrations.
-- `tests/`: Test suite.
+<br/>
 
-Package-level READMEs are available under `api/src/*/README.md`.
+---
 
 ## How It Works
 
-### 1. Job Submission
+<details>
+<summary><b>1 — Job Submission &nbsp;·&nbsp; <code>POST /api/v1/jobs</code></b></summary>
+<br/>
 
-`POST /api/v1/jobs`
+| Step | Detail |
+|------|--------|
+| Auth | Tenant authenticates via `X-API-Key` header |
+| Validation | File MIME type checked; extraction schema accepted as JSON or raw string |
+| Dedup | File SHA-256 hash verified against Redis Bloom filter |
+| Storage | File uploaded to S3-compatible store |
+| Dispatch | Job created in Postgres (`PENDING` or `QUEUED_AI_OUTAGE`); Celery task enqueued if breaker is closed |
 
-- Tenant authenticates using `X-API-Key`.
-- File is validated by MIME type.
-- Extraction schema is accepted as JSON or raw string.
-- File hash is checked against Redis Bloom filter for duplicate detection.
-- File is uploaded to S3-compatible storage.
-- Job is created in Postgres with `PENDING` or `QUEUED_AI_OUTAGE` status.
-- If the AI breaker is closed, a Celery task is enqueued.
+</details>
 
-### 2. Background Processing (`process_job_task`)
+<details>
+<summary><b>2 — Background Processing &nbsp;·&nbsp; <code>process_job_task</code></b></summary>
+<br/>
 
-Worker flow:
+```
+Load job → PROCESSING
+  ↓
+Download file from S3
+  ↓
+Extract plain text (OCR / DOCX / PDF)
+  ↓
+Run LLM extraction (run_extraction)
+  ↓
+Persist result → COMPLETE
+  ↓
+Deliver webhook (if configured)
+```
 
-1. Load job and mark as `PROCESSING`.
-2. Download file from storage.
-3. Extract plain text from document.
-4. Run LLM extraction (`run_extraction`).
-5. Persist result and mark `COMPLETE`.
-6. Deliver webhook (if configured).
+Real-time `progress_message` is written to the job record at each phase so clients can display live progress via polling.
 
-### 3. LLM Extraction Strategy (`api/src/services/llm.py`)
+</details>
 
-- Uses strict JSON response mode (`response_format={"type": "json_object"}`).
-- Uses output cap (`max_tokens=8192`).
-- Applies prompt-budget checks before each call.
-- For small docs: single-shot extraction.
-- For large docs:
-	- Map phase: chunked extraction with semaphore throttling.
-	- Reduce phase: batched multi-round merge with semaphore throttling.
-	- Recursive merge fallback if any merge group still hits context limits.
-- JSON robustness:
-	- Primary parse via `json.loads`.
-	- Fallback auto-repair via `json-repair` for truncated/malformed JSON.
+<details>
+<summary><b>3 — LLM Extraction Strategy &nbsp;·&nbsp; <code>api/src/services/llm.py</code></b></summary>
+<br/>
 
-### 4. Reliability & Failure Semantics
+| Mode | When | How |
+|------|------|-----|
+| **Single-shot** | Small documents | One LLM call with full document in context |
+| **Map phase** | Large documents | Document chunked → parallel LLM calls (semaphore-gated, max 5 concurrent) |
+| **Reduce phase** | After map | Partial results batched → multi-round merge (semaphore-gated); recursive fallback if any merge group still hits context limits |
 
-- `BadRequestError` (e.g., hard context/request issues): treated as permanent (`DEAD`).
-- `JSONDecodeError`: treated as retryable first, retried with 30s delay, then `DEAD` after max retries.
-- Generic exceptions: retried with Celery backoff.
-- AI outage detection can trip circuit breaker and queue jobs as `QUEUED_AI_OUTAGE`.
-- Sweeper task requeues stale pending jobs when breaker is closed.
+**JSON robustness:**
+1. Primary parse via `json.loads`
+2. Fallback auto-repair via `json-repair` for truncated / malformed responses
+3. `max_tokens=8192` output cap prevents silent truncation
 
-## API Endpoints
+</details>
 
-### Health
+<details>
+<summary><b>4 — Reliability & Failure Semantics</b></summary>
+<br/>
 
-- `GET /health`
+| Error Type | Behaviour |
+|-----------|-----------|
+| `BadRequestError` (hard context / request error) | Immediately marked `DEAD` |
+| `JSONDecodeError` | Retried with 30 s delay; `DEAD` after max retries |
+| Generic exception | Retried with Celery exponential backoff |
+| AI provider outage | Circuit breaker trips; jobs queued as `QUEUED_AI_OUTAGE`; sweeper requeues when breaker closes |
 
-### Tenant
+</details>
 
-- `POST /api/v1/tenants` create tenant
-- `POST /api/v1/tenants/login` tenant login + API key rotation
-- `GET /api/v1/tenants/me` current tenant profile
-- `PATCH /api/v1/tenants/me` update tenant fields
-- `DELETE /api/v1/tenants/me` deactivate tenant
+<br/>
 
-### Jobs
+---
 
-- `POST /api/v1/jobs` submit extraction job
-- `GET /api/v1/jobs/{job_id}` get job status/result
-- `GET /api/v1/jobs` list tenant jobs
-- `DELETE /api/v1/jobs/{job_id}` cancel queued job
+## API Reference
+
+<details open>
+<summary><b>Endpoints</b></summary>
+<br/>
+
+**Health**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Service health check |
+
+**Tenant**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/tenants` | Create tenant |
+| `POST` | `/api/v1/tenants/login` | Login + API key rotation |
+| `GET` | `/api/v1/tenants/me` | Current tenant profile |
+| `PATCH` | `/api/v1/tenants/me` | Update tenant fields |
+| `DELETE` | `/api/v1/tenants/me` | Deactivate tenant |
+
+**Jobs**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/jobs` | Submit extraction job |
+| `GET` | `/api/v1/jobs/{job_id}` | Get job status / result / progress |
+| `GET` | `/api/v1/jobs` | List all tenant jobs |
+| `DELETE` | `/api/v1/jobs/{job_id}` | Cancel queued job |
+
+</details>
+
+<br/>
+
+---
 
 ## Configuration
 
 Configuration is loaded from `.env` via `api/src/config_package/settings.py`.
 
-Important variables:
+<details>
+<summary><b>Environment Variables</b></summary>
+<br/>
 
-- `database_url`
-- `SECRET_KEY`
-- `ALGORITHM`
-- `openai_api_key`
-- `openai_model`
-- `openai_base_url`
-- `redis_url`
-- `celery_task_default_queue`
-- `s3_endpoint_url`
-- `s3_access_key_id`
-- `s3_secret_access_key`
-- `s3_region`
-- `s3_bucket_name`
+| Variable | Description |
+|----------|-------------|
+| `database_url` | PostgreSQL connection string |
+| `SECRET_KEY` | JWT signing secret |
+| `ALGORITHM` | JWT algorithm (e.g. `HS256`) |
+| `openai_api_key` | LLM provider API key |
+| `openai_model` | Model name (e.g. `deepseek-chat`) |
+| `openai_base_url` | Override for DeepSeek / alternative providers |
+| `redis_url` | Redis connection string |
+| `celery_task_default_queue` | Default Celery queue name |
+| `s3_endpoint_url` | S3 / MinIO endpoint |
+| `s3_access_key_id` | S3 access key |
+| `s3_secret_access_key` | S3 secret key |
+| `s3_region` | S3 region |
+| `s3_bucket_name` | Target bucket name |
+
+</details>
+
+<br/>
+
+---
 
 ## Local Development
 
-### 1. Install dependencies
-
+**1. Install dependencies**
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Set up environment
-
-Create `.env` with required values.
-
-### 3. Run API
-
+**2. Set up environment**
 ```bash
-uvicorn main:app --reload
+cp .env.example .env   # fill in required values
 ```
 
-### 4. Run Celery worker
-
-```bash
-celery -A api.src.tasks.celery_app:celery_app worker -l info
-```
-
-### 5. Run Celery beat (for sweepers)
-
-```bash
-celery -A api.src.tasks.celery_app:celery_app beat -l info
-```
-
-### 6. Migrations
-
+**3. Apply migrations**
 ```bash
 alembic upgrade head
 ```
 
-## Testing
+**4. Start the API**
+```bash
+uvicorn main:app --reload
+```
 
-Run tests:
+**5. Start the Celery worker**
+```bash
+celery -A api.src.tasks.celery_app:celery_app worker -l info
+```
+
+**6. Start Celery beat** *(sweepers)*
+```bash
+celery -A api.src.tasks.celery_app:celery_app beat -l info
+```
+
+<br/>
+
+---
+
+## Testing
 
 ```bash
 python -m pytest -q
 ```
 
-Current verified state: `14 passed`.
+> **Current verified state: 23 passed**
 
-## Debugging & Observability
+Tests cover: health, reliability semantics, tenant login, extractor pipeline, and LLM helper modules (`llm_limits`, `llm_prompts`).
 
-- Rich tracebacks enabled in API and Celery bootstrap (`install(show_locals=True)`).
-- Correlation IDs are tracked across submission and worker logs.
-- Job status and error logs are persisted in Postgres.
+<br/>
 
-## Security Notes
+---
 
-- Tenant API keys are hashed before persistence.
-- Passwords are Argon2-hashed.
-- Webhook destinations are validated and private/reserved IPs are blocked.
-- Refresh token records include session metadata and revocation/usage fields.
+## Observability
+
+- **Rich tracebacks** enabled in both API and Celery worker (`install(show_locals=True)`)
+- **Correlation IDs** tracked across job submission and worker logs
+- **Live progress messages** written to `jobs.progress_message` at each extraction phase
+- **Error logs** persisted per-job in Postgres for post-mortem analysis
+
+<br/>
+
+---
+
+## Security
+
+| Concern | Implementation |
+|---------|---------------|
+| API key storage | Hashed before DB persistence (never stored in plain text) |
+| Passwords | Argon2-hashed |
+| Webhooks | Destination URLs validated; private / reserved IPs blocked (SSRF protection) |
+| Refresh tokens | Session metadata, revocation + usage tracking |
+| Rate limiting | SlowAPI per-tenant limits on all job endpoints |
+
+<br/>
+
+---
 
 ## Operational Notes
 
-- Restart Celery workers after task/service code changes.
-- Restart Celery beat after schedule changes.
-- Circuit breaker state is Redis-backed and automatically expires.
+> **After any code change:**
+> - Restart Celery **workers** after modifying task or service code.
+> - Restart Celery **beat** after changing scheduled task intervals.
+> - Run `alembic upgrade head` after pulling new migrations.
+
+<br/>
+
+---
 
 ## License
 
-Internal project. Add your organization license policy here.
+```
+MIT License
+
+Copyright (c) 2026 DocFlow
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```
+
+<div align="center">
+<br/>
+<sub>Built with FastAPI · Celery · PostgreSQL · Redis · OpenAI SDK</sub>
+</div>

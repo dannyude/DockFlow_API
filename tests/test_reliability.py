@@ -124,6 +124,39 @@ def test_sweeper_requeues_stuck_jobs(monkeypatch):
     assert db.commits == 1
 
 
+def test_sweeper_abandons_poison_job_after_max_attempts(monkeypatch):
+    from api.src.jobs.reliability import MAX_ENQUEUE_ATTEMPTS
+
+    now = datetime.now(timezone.utc)
+    poison_job = SimpleNamespace(
+        id=uuid4(),
+        correlation_id="corr-poison-1",
+        status=JobStatus.PENDING,
+        enqueue_attempts=MAX_ENQUEUE_ATTEMPTS,
+        last_enqueued_at=now - timedelta(minutes=5),
+        error_log=None,
+        created_at=now - timedelta(minutes=60),
+    )
+    db = DummyDbSession(jobs=[poison_job])
+
+    sent = []
+
+    monkeypatch.setattr(sweeper_module, "SyncSessionLocal", lambda: db)
+    monkeypatch.setattr(sweeper_module, "pending_cutoff", lambda: now - timedelta(minutes=10))
+    monkeypatch.setattr(sweeper_module.redis_sync, "get", lambda _k: None)
+    monkeypatch.setattr(
+        sweeper_module.celery_app,
+        "send_task",
+        lambda task_name, args: sent.append((task_name, args)),
+    )
+
+    cast(Any, sweeper_module.sweep_stuck_jobs_task).run()
+
+    assert poison_job.status == JobStatus.DEAD
+    assert sent == []
+    assert db.commits == 1
+
+
 def test_submit_job_propagates_correlation_id(monkeypatch):
     tenant_id = uuid4()
     captured = {}

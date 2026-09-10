@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 
-CHARS_PER_TOKEN = 1  # conservative average for English text
+CHARS_PER_TOKEN = 4  # ~4 chars/token is the empirical average for English text
 MODEL_MAX_CONTEXT_TOKENS = 131_072
 PROMPT_TOKEN_BUDGET = 110_000
 PROMPT_CHAR_BUDGET = PROMPT_TOKEN_BUDGET * CHARS_PER_TOKEN

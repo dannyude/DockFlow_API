@@ -13,6 +13,7 @@ from api.src.jobs.enums import JobStatus
 from api.src.jobs.models import Job
 from api.src.jobs.reliability import (
     AI_BREAKER_OPEN_UNTIL_KEY,
+    MAX_ENQUEUE_ATTEMPTS,
     SWEEPER_INTERVAL_MINUTES,
     pending_cutoff,
 )
@@ -49,10 +50,22 @@ def sweep_stuck_jobs_task(_self) -> None:
             return
 
         requeued = 0
+        dead = 0
         for job in jobs:
             if circuit_open:
                 job.status = JobStatus.QUEUED_AI_OUTAGE
                 job.error_log = "Waiting for AI circuit breaker to close"
+                continue
+
+            # Give up on poison jobs that never reach a terminal state so they
+            # do not get re-enqueued on every sweep cycle forever.
+            if job.enqueue_attempts >= MAX_ENQUEUE_ATTEMPTS:
+                job.status = JobStatus.DEAD
+                job.error_log = (
+                    f"Exceeded max enqueue attempts ({MAX_ENQUEUE_ATTEMPTS}); "
+                    "abandoned by sweeper"
+                )
+                dead += 1
                 continue
 
             if job.status == JobStatus.QUEUED_AI_OUTAGE:
@@ -68,8 +81,9 @@ def sweep_stuck_jobs_task(_self) -> None:
 
         db.commit()
         logger.info(
-            "Sweeper examined %s jobs and requeued %s (interval=%s min)",
+            "Sweeper examined %s jobs, requeued %s, abandoned %s (interval=%s min)",
             len(jobs),
             requeued,
+            dead,
             SWEEPER_INTERVAL_MINUTES,
         )

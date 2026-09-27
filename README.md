@@ -23,9 +23,9 @@
 <br/><br/>
 
 <!-- Status Badges -->
-<img src="https://img.shields.io/badge/tests-23%20passed-22C55E?style=flat-square"/>
+<img src="https://img.shields.io/badge/tests-24%20passed-22C55E?style=flat-square"/>
 <img src="https://img.shields.io/badge/license-MIT-3B82F6?style=flat-square"/>
-<img src="https://img.shields.io/badge/python-3.11%2B-F59E0B?style=flat-square&logo=python&logoColor=white"/>
+<img src="https://img.shields.io/badge/python-3.10%2B-F59E0B?style=flat-square&logo=python&logoColor=white"/>
 
 <br/><br/>
 
@@ -238,7 +238,7 @@ Real-time `progress_message` is written to the job record at each phase so clien
 
 ## Configuration
 
-Configuration is loaded from `.env` via `api/src/config_package/settings.py`.
+Configuration is loaded from `.env` via `api/src/config_package/settings.py`. Copy [`.env.example`](.env.example) to get started.
 
 <details>
 <summary><b>Environment Variables</b></summary>
@@ -268,32 +268,48 @@ Configuration is loaded from `.env` via `api/src/config_package/settings.py`.
 
 ## Local Development
 
-**1. Install dependencies**
+**Prerequisites**
+- Python 3.10+
+- Docker (for Postgres, Redis and MinIO)
+- [Tesseract OCR](https://tesseract-ocr.github.io/tessdoc/Installation.html), only needed to process image uploads (`apt install tesseract-ocr` / `brew install tesseract`)
+
+**1. Create a virtual environment and install dependencies**
 ```bash
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
+*Using [uv](https://docs.astral.sh/uv/)? `uv sync` installs from `uv.lock` instead.*
 
 **2. Set up environment**
 ```bash
-cp .env.example .env   # fill in required values
+cp .env.example .env   # add your LLM API key; other defaults match docker-compose.yml
 ```
 
-**3. Apply migrations**
+**3. Start Postgres, Redis and MinIO**
+```bash
+docker compose up -d
+```
+Redis runs as `redis-stack`, which includes the Bloom filter module used for duplicate detection. The S3 bucket is created automatically when the API starts.
+
+**4. Apply migrations**
 ```bash
 alembic upgrade head
 ```
+Run this before starting the API for the first time. If you have a database that the API created on startup, before migrations existed, mark it as current with `alembic stamp head` instead.
 
-**4. Start the API**
+**5. Start the API**
 ```bash
 uvicorn main:app --reload
 ```
+Interactive docs are at http://localhost:8000/docs.
 
-**5. Start the Celery worker**
+**6. Start the Celery worker**
 ```bash
 celery -A api.src.tasks.celery_app:celery_app worker -l info
 ```
 
-**6. Start Celery beat** *(sweepers)*
+**7. Start Celery beat** *(sweepers)*
 ```bash
 celery -A api.src.tasks.celery_app:celery_app beat -l info
 ```
@@ -304,11 +320,14 @@ celery -A api.src.tasks.celery_app:celery_app beat -l info
 
 ## Testing
 
+The test suite mocks Postgres, Redis, S3 and the LLM, so it needs no running services. It does need a `.env`, and the defaults from `.env.example` are enough:
+
 ```bash
+cp .env.example .env   # skip if you already did this above
 python -m pytest -q
 ```
 
-> **Current verified state: 23 passed**
+> **Current verified state: 24 passed**
 
 Tests cover: health, reliability semantics, tenant login, extractor pipeline, and LLM helper modules (`llm_limits`, `llm_prompts`).
 

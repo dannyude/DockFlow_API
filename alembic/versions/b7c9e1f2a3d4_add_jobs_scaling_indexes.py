@@ -26,13 +26,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.create_index(
-        "ix_jobs_tenant_created", "jobs", ["tenant_id", "created_at"], unique=False
+        "ix_jobs_tenant_created", "jobs", ["tenant_id", "created_at"], unique=False,
+        if_not_exists=True,
     )
     op.create_index(
-        "ix_jobs_status_created", "jobs", ["status", "created_at"], unique=False
+        "ix_jobs_status_created", "jobs", ["status", "created_at"], unique=False,
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_jobs_status_created", table_name="jobs")
-    op.drop_index("ix_jobs_tenant_created", table_name="jobs")
+    op.drop_index("ix_jobs_status_created", table_name="jobs", if_exists=True)
+    op.drop_index("ix_jobs_tenant_created", table_name="jobs", if_exists=True)

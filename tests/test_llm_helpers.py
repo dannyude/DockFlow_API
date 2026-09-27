@@ -11,7 +11,8 @@ from api.src.services.llm_prompts import build_chunk_prompt, build_merge_prompt,
 
 
 def test_estimate_tokens_uses_configured_ratio() -> None:
-    assert estimate_tokens("abcd") == 4
+    # ~4 chars per token: an 8-char string is ~2 tokens.
+    assert estimate_tokens("abcdefgh") == 2
 
 
 def test_budgeted_content_chars_respects_minimum_floor() -> None:

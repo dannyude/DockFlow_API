@@ -2,6 +2,7 @@
 
 import uuid
 import logging
+from functools import lru_cache
 
 import boto3
 from botocore.client import BaseClient
@@ -12,8 +13,14 @@ from api.src.config_package.settings import get_settings
 cfg = get_settings()
 logger = logging.getLogger(__name__)
 
+
+@lru_cache(maxsize=1)
 def _client() -> BaseClient:
-    """Create a configured S3-compatible client instance."""
+    """Return a cached S3-compatible client.
+
+    boto3 clients are thread-safe, so a single reused client keeps its
+    connection pool warm instead of rebuilding one on every call.
+    """
     return boto3.client(
         "s3",
         endpoint_url=cfg.s3_endpoint_url,

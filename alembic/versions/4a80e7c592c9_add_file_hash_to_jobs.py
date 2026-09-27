@@ -1,7 +1,7 @@
 """add file_hash to jobs
 
 Revision ID: 4a80e7c592c9
-Revises:
+Revises: 0a1b2c3d4e5f
 Create Date: 2026-03-03 15:41:21.900318
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '4a80e7c592c9'
-down_revision: Union[str, Sequence[str], None] = None
+down_revision: Union[str, Sequence[str], None] = '0a1b2c3d4e5f'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -10,6 +10,10 @@ AI_BREAKER_OPEN_SECONDS = 10 * 60
 PENDING_SWEEP_MINUTES = 10
 SWEEPER_INTERVAL_MINUTES = 5
 
+# Maximum times the sweeper will re-enqueue a stuck job before declaring it
+# DEAD. Prevents a poison job from being re-queued indefinitely every cycle.
+MAX_ENQUEUE_ATTEMPTS = 5
+
 
 def utcnow() -> datetime:
     """Return the current UTC datetime."""
